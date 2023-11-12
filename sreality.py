@@ -6,28 +6,6 @@ import os
 import sys
 from datetime import datetime,timedelta
 
-class Estate:
-    id = ""
-    counting_date = datetime.fromtimestamp(time.time())
-    prices = []
-    dates_of_prices = [] 
-    area = 0
-    place = ""
-    site_id = 0
-    link_to_site = "https://www.sreality.cz/detail/prodej/komercni/cinzovni-dum/"+place+"/"+str(site_id)
-    def __init__(self,id, counting_date, price, area, place,site_id):
-        self.id = id
-        self.prices.append(price)
-        self.dates_of_prices.append(datetime.fromtimestamp(time.time()))
-        self.area = area
-        self.place = place 
-        self.site_id = site_id
-        if counting_date == 0 :
-            self.counting_date = datetime.fromtimestamp(time.time())
-        else:
-            self.counting_date = counting_date
-
-
 main_data_file = "sreality.xlsx"
 data_over = "sreality_6_mesicu.xlsx"
 if not os.path.exists(main_data_file):
@@ -54,40 +32,52 @@ ex_estates = pd.read_excel(main_data_file)
 ex_estates_six = pd.read_excel(data_over)
 ex_estates = pd.concat([ex_estates,ex_estates_six],axis=0)
 ex_estates['checked'] = False
+print(len(estates))
 for index,estate in enumerate(estates):
     sys.stdout.write(f'\rProgress: {index}/{per_page_results}')
     link = estate["_links"]["self"]["href"]
-    result = requests.get(root_path+link) 
+    user_agent = "Insomnia/2023.5.7"
+    headers = {"User-Agent": user_agent}
+    result = requests.get(root_path+link,headers=headers) 
     json = result.json()
     items = np.array(json["items"])
     place = json["seo"]["locality"]
     site_id = link.split("/")[-1]
-    price = ""
+    if len(json["price_czk"])==0:
+        price = json["items"][0]["value"]
+    else:
+        price = json["price_czk"]["value_raw"]
     id = ""
     area = 0
     exists = False
     for item in items:  
-        if item["name"] == "Cena" or item["name"] == "Celková cena":
-            price = item["value"].replace("\xa0",'') 
-        elif item["name"] == "ID zakázky" or item["name"] == "ID":
+        if item["name"] == "ID zakázky" or item["name"] == "ID":
             id = str(item["value"])
             if id in ex_estates['id'].values:
-                row = ex_estates[ex_estates['id']==id]
-                if price != row['prices'][-1]:
-                    row['prices'].append(price) 
-                    row['date_of_prices'].append(datetime.fromtimestamp(time.time()))
-                    row['checked'] = True
+                index = ex_estates[ex_estates['id']==id].index[0]
+                list_of_prices =  eval(ex_estates.at[index,'prices'])
+                if price != list_of_prices[-1]:
+                    new_list = eval(ex_estates.at[index,'prices'])
+                    new_list.append(price)
+                    ex_estates.at[index,'prices']=new_list
+                    new_list = eval(ex_estates.at[index,'dates_of_prices'])
+                    now = datetime.fromtimestamp(time.time())
+                    formatted_date = str(now.year)+"/"+str(now.month)+"/"+str(now.day)
+                    new_list.append(formatted_date)
+                    ex_estates.at[index,'dates_of_prices'] = new_list
+                    ex_estates.at[index,'checked'] = True
                     exists = True
-                break;
         elif item["name"] == "Užitná plocha":
             area = item["value"] 
             break; 
              
     if exists == True:
-        break;
+        sys.stdout.flush()
+        continue;
 
     date = datetime.fromtimestamp(time.time())
-    dates_of_prices = [date]
+    formatted_date = str(date.year)+"/"+str(date.month)+"/"+str(date.day)
+    dates_of_prices = [formatted_date]
     prices = [price]
     link_to_site = "https://www.sreality.cz/detail/prodej/komercni/cinzovni-dum/"+place+"/"+str(site_id)
     ex_estates.loc[len(ex_estates)] = {'id':id,'counting_date':date,'prices':prices,'dates_of_prices':dates_of_prices,'area':area,'place':place,'site_id':site_id,'link_to_site':link_to_site,'checked':True}
